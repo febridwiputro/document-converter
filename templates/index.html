@@ -96,6 +96,7 @@
         <div data-mode-panel="merge_pdf_images" class="{% if active_mode != 'merge_pdf_images' %}hidden{% endif %}">
           <form action="/merge" method="post" enctype="multipart/form-data" class="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <input type="hidden" name="lang" class="lang-hidden-input" value="{{ active_lang }}" />
+            <input type="hidden" id="merge_order" name="merge_order" value="" />
             <div class="lg:col-span-6">
               <label for="pdf_file" class="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
                 {{ i18n.upload_pdf_optional }}
@@ -127,14 +128,14 @@
             <div class="lg:col-span-12">
               <section class="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                 <div class="mb-2 flex items-center justify-between gap-3">
-                  <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{{ i18n.selected_images_list }}</p>
+                  <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{{ i18n.selected_files_list }}</p>
                   <span id="selectedCount" class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-600">0 {{ i18n.selected_count_suffix }}</span>
                 </div>
                 <p class="mb-2 text-xs text-slate-500">{{ i18n.drag_reorder_hint }}</p>
-                <p id="imagePreviewEmpty" class="rounded-md border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
-                  {{ i18n.empty_selected_images }}
+                <p id="selectedFilesEmpty" class="rounded-md border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
+                  {{ i18n.empty_selected_files }}
                 </p>
-                <ul id="imagePreviewList" class="hidden divide-y divide-slate-200 overflow-hidden rounded-md border border-slate-200 bg-white"></ul>
+                <ul id="selectedFilesList" class="hidden divide-y divide-slate-200 overflow-hidden rounded-md border border-slate-200 bg-white"></ul>
               </section>
             </div>
 
@@ -270,6 +271,7 @@
       </div>
       <div class="max-h-[82vh] overflow-auto rounded-md border border-slate-700 bg-black/60 p-2">
         <img id="fullscreenImage" src="" alt="{{ i18n.alt_fullscreen_preview }}" class="mx-auto h-auto max-h-[78vh] w-auto max-w-full rounded" />
+        <iframe id="fullscreenPdf" src="" title="{{ i18n.alt_fullscreen_preview }}" class="hidden h-[78vh] w-full rounded border-0 bg-white"></iframe>
       </div>
     </div>
   </div>
@@ -341,8 +343,10 @@
     });
 
     const imageInput = document.getElementById("image_files");
-    const imagePreviewList = document.getElementById("imagePreviewList");
-    const imagePreviewEmpty = document.getElementById("imagePreviewEmpty");
+    const pdfInput = document.getElementById("pdf_file");
+    const mergeOrderInput = document.getElementById("merge_order");
+    const selectedFilesList = document.getElementById("selectedFilesList");
+    const selectedFilesEmpty = document.getElementById("selectedFilesEmpty");
     const selectedCount = document.getElementById("selectedCount");
     const jsonFilesInput = document.getElementById("json_files");
     const jsonMergeStatus = document.getElementById("jsonMergeStatus");
@@ -351,11 +355,12 @@
     const fullscreenModal = document.getElementById("fullscreenModal");
     const fullscreenBackdrop = document.getElementById("fullscreenBackdrop");
     const fullscreenImage = document.getElementById("fullscreenImage");
+    const fullscreenPdf = document.getElementById("fullscreenPdf");
     const fullscreenTitle = document.getElementById("fullscreenTitle");
     const closeFullscreenBtn = document.getElementById("closeFullscreenBtn");
 
-    let previewUrls = [];
-    let selectedImageFiles = [];
+    let mergedPreviewUrls = [];
+    let mergedItems = [];
     let draggedIndex = null;
 
     function formatFileSize(bytes) {
@@ -366,28 +371,71 @@
       return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
     }
 
-    function clearPreviewUrls() {
-      previewUrls.forEach((url) => URL.revokeObjectURL(url));
-      previewUrls = [];
+    function revokeMergedPreviewUrls() {
+      mergedPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+      mergedPreviewUrls = [];
     }
 
-    function syncInputFilesOrder() {
-      const dataTransfer = new DataTransfer();
-      selectedImageFiles.forEach((file) => dataTransfer.items.add(file));
-      imageInput.files = dataTransfer.files;
+    function createMergedItem(file, type) {
+      const previewUrl = URL.createObjectURL(file);
+      mergedPreviewUrls.push(previewUrl);
+      return { type, file, previewUrl };
     }
 
-    function moveImageItem(fromIndex, toIndex) {
+    function setMergeOrderValue() {
+      if (!mergeOrderInput) return;
+      mergeOrderInput.value = JSON.stringify(mergedItems.map((item) => item.type));
+    }
+
+    function syncInputsFromMergedItems() {
+      if (typeof DataTransfer === "undefined") {
+        setMergeOrderValue();
+        return;
+      }
+
+      if (imageInput) {
+        const imageTransfer = new DataTransfer();
+        mergedItems
+          .filter((item) => item.type === "image")
+          .forEach((item) => imageTransfer.items.add(item.file));
+        imageInput.files = imageTransfer.files;
+      }
+
+      if (pdfInput) {
+        const pdfTransfer = new DataTransfer();
+        const pdfItem = mergedItems.find((item) => item.type === "pdf");
+        if (pdfItem) {
+          pdfTransfer.items.add(pdfItem.file);
+        }
+        pdfInput.files = pdfTransfer.files;
+      }
+
+      setMergeOrderValue();
+    }
+
+    function moveMergedItem(fromIndex, toIndex) {
       if (fromIndex === toIndex) return;
-      const [moved] = selectedImageFiles.splice(fromIndex, 1);
-      selectedImageFiles.splice(toIndex, 0, moved);
-      syncInputFilesOrder();
-      renderImagePreviewList();
+      const [moved] = mergedItems.splice(fromIndex, 1);
+      mergedItems.splice(toIndex, 0, moved);
+      syncInputsFromMergedItems();
+      renderSelectedFilesList();
     }
 
-    function openFullscreen(src, title) {
-      fullscreenImage.src = src;
+    function openFullscreen(src, title, type = "image") {
       fullscreenTitle.textContent = title;
+
+      if (type === "pdf") {
+        fullscreenImage.src = "";
+        fullscreenImage.classList.add("hidden");
+        fullscreenPdf.src = src;
+        fullscreenPdf.classList.remove("hidden");
+      } else {
+        fullscreenPdf.src = "";
+        fullscreenPdf.classList.add("hidden");
+        fullscreenImage.src = src;
+        fullscreenImage.classList.remove("hidden");
+      }
+
       fullscreenModal.classList.remove("hidden");
       fullscreenModal.classList.add("flex");
       document.body.classList.add("overflow-hidden");
@@ -395,30 +443,66 @@
 
     function closeFullscreen() {
       fullscreenImage.src = "";
+      fullscreenImage.classList.remove("hidden");
+      fullscreenPdf.src = "";
+      fullscreenPdf.classList.add("hidden");
       fullscreenTitle.textContent = "";
       fullscreenModal.classList.add("hidden");
       fullscreenModal.classList.remove("flex");
       document.body.classList.remove("overflow-hidden");
     }
 
-    function renderImagePreviewList() {
-      clearPreviewUrls();
-      imagePreviewList.innerHTML = "";
-
-      selectedCount.textContent = `${selectedImageFiles.length} ${i18n.selected_count_suffix}`;
-
-      if (selectedImageFiles.length === 0) {
-        imagePreviewEmpty.classList.remove("hidden");
-        imagePreviewList.classList.add("hidden");
+    function rebuildMergedItemsFromInputs() {
+      if (!imageInput || !pdfInput) {
         return;
       }
 
-      imagePreviewEmpty.classList.add("hidden");
-      imagePreviewList.classList.remove("hidden");
+      revokeMergedPreviewUrls();
+      mergedItems = [];
 
-      selectedImageFiles.forEach((file, index) => {
-        const previewUrl = URL.createObjectURL(file);
-        previewUrls.push(previewUrl);
+      const pdfFile = (pdfInput.files && pdfInput.files[0]) || null;
+      if (pdfFile) {
+        mergedItems.push(createMergedItem(pdfFile, "pdf"));
+      }
+
+      const imageFiles = Array.from(imageInput.files || []).filter((file) => file.type.startsWith("image/"));
+      imageFiles.forEach((file) => {
+        mergedItems.push(createMergedItem(file, "image"));
+      });
+
+      syncInputsFromMergedItems();
+      renderSelectedFilesList();
+    }
+
+    function renderSelectedFilesList() {
+      if (!selectedFilesList || !selectedFilesEmpty || !selectedCount) {
+        return;
+      }
+
+      selectedFilesList.innerHTML = "";
+      selectedCount.textContent = `${mergedItems.length} ${i18n.selected_count_suffix}`;
+
+      if (mergedItems.length === 0) {
+        selectedFilesEmpty.classList.remove("hidden");
+        selectedFilesList.classList.add("hidden");
+        return;
+      }
+
+      selectedFilesEmpty.classList.add("hidden");
+      selectedFilesList.classList.remove("hidden");
+
+      mergedItems.forEach((item, index) => {
+        const isPdf = item.type === "pdf";
+        const thumbHtml = isPdf
+          ? `
+            <div class="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+              <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5">
+                <path d="M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                <path d="M14 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+              </svg>
+            </div>
+          `
+          : `<img src="${item.previewUrl}" alt="${item.file.name}" class="h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover" />`;
 
         const listItem = document.createElement("li");
         listItem.className = "flex items-center gap-3 px-3 py-2 cursor-move";
@@ -434,10 +518,10 @@
               <circle cx="15" cy="18" r="1.2"></circle>
             </svg>
           </span>
-          <img src="${previewUrl}" alt="${file.name}" class="h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover" />
+          ${thumbHtml}
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-slate-800">${file.name}</p>
-            <p class="text-xs text-slate-500">${formatFileSize(file.size)}</p>
+            <p class="truncate text-sm font-semibold text-slate-800">${item.file.name}</p>
+            <p class="text-xs text-slate-500">${formatFileSize(item.file.size)}</p>
           </div>
           <button
             type="button"
@@ -452,7 +536,9 @@
         `;
 
         const previewBtn = listItem.querySelector("button");
-        previewBtn.addEventListener("click", () => openFullscreen(previewUrl, file.name));
+        previewBtn.addEventListener("click", () =>
+          openFullscreen(item.previewUrl, item.file.name, isPdf ? "pdf" : "image")
+        );
 
         listItem.addEventListener("dragstart", (event) => {
           draggedIndex = index;
@@ -476,18 +562,18 @@
           listItem.classList.remove("ring-2", "ring-blue-500", "ring-inset");
           const fromIndex = draggedIndex ?? Number(event.dataTransfer.getData("text/plain"));
           if (!Number.isInteger(fromIndex) || fromIndex < 0) return;
-          moveImageItem(fromIndex, index);
+          moveMergedItem(fromIndex, index);
         });
 
         listItem.addEventListener("dragend", () => {
           draggedIndex = null;
           listItem.classList.remove("opacity-50");
-          imagePreviewList.querySelectorAll("li").forEach((item) => {
-            item.classList.remove("ring-2", "ring-blue-500", "ring-inset");
+          selectedFilesList.querySelectorAll("li").forEach((node) => {
+            node.classList.remove("ring-2", "ring-blue-500", "ring-inset");
           });
         });
 
-        imagePreviewList.appendChild(listItem);
+        selectedFilesList.appendChild(listItem);
       });
     }
 
@@ -611,11 +697,13 @@
       }
     }
 
-    imageInput.addEventListener("change", () => {
-      selectedImageFiles = Array.from(imageInput.files || []).filter((file) => file.type.startsWith("image/"));
-      syncInputFilesOrder();
-      renderImagePreviewList();
-    });
+    if (imageInput) {
+      imageInput.addEventListener("change", rebuildMergedItemsFromInputs);
+    }
+    if (pdfInput) {
+      pdfInput.addEventListener("change", rebuildMergedItemsFromInputs);
+    }
+    rebuildMergedItemsFromInputs();
     if (jsonFilesInput) {
       jsonFilesInput.addEventListener("change", validateJsonKeys);
       setJsonMergeState({
@@ -631,7 +719,9 @@
         closeFullscreen();
       }
     });
-    window.addEventListener("beforeunload", clearPreviewUrls);
+    window.addEventListener("beforeunload", () => {
+      revokeMergedPreviewUrls();
+    });
   </script>
 </body>
 </html>

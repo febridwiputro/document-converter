@@ -4,16 +4,18 @@ import socket
 import uvicorn
 
 
+def is_port_in_use(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex((host, port)) == 0
+
+
 def find_available_port(host: str, start_port: int) -> int:
     port = start_port
     while port <= 65535:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                sock.bind((host, port))
-                return port
-            except OSError:
-                port += 1
+        if not is_port_in_use(host, port):
+            return port
+        port += 1
     raise RuntimeError("No available port found in range 8000-65535")
 
 

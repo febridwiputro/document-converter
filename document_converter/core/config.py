@@ -6,14 +6,16 @@ OUTPUT_DIR = BASE_DIR / "outputs"
 TEMPLATE_DIR = BASE_DIR / "templates"
 
 
-# A4 page size constants for image-to-PDF layout
-A4_WIDTH_PX = 1240
-A4_HEIGHT_PX = 1754
-SIDE_MARGIN = 40
-TOP_MARGIN = 110
-BOTTOM_MARGIN = 40
-IMAGE_GAP = 24
+# A4 page size constants for image-to-PDF layout (300 DPI)
+A4_WIDTH_PX = 2480
+A4_HEIGHT_PX = 3508
+SIDE_MARGIN = 80
+TOP_MARGIN = 220
+BOTTOM_MARGIN = 80
+IMAGE_GAP = 48
 MIN_PAGE_SCALE = 0.45
+PDF_EXPORT_DPI = 300
+PDF_JPEG_QUALITY = 95
 
 
 def ensure_directories() -> None:

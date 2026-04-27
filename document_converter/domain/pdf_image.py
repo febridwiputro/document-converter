@@ -81,6 +81,13 @@ def build_image_pages(images: List[Image.Image]) -> List[Image.Image]:
 
 def page_image_to_pdf_reader(page_image: Image.Image) -> PdfReader:
     buffer = io.BytesIO()
-    page_image.save(buffer, format="PDF", resolution=150.0)
+    page_image.save(
+        buffer,
+        format="PDF",
+        resolution=float(config.PDF_EXPORT_DPI),
+        quality=config.PDF_JPEG_QUALITY,
+        subsampling=0,
+        optimize=False,
+    )
     buffer.seek(0)
     return PdfReader(buffer)

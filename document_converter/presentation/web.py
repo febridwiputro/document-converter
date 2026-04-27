@@ -70,12 +70,14 @@ def create_app() -> FastAPI:
     async def merge_pdf_images(
         request: Request,
         lang: str = Form(DEFAULT_LANG),
+        merge_order: Optional[str] = Form(None),
         pdf_file: Optional[UploadFile] = File(None),
         image_files: list[UploadFile] = File(...),
     ):
         current_lang = normalize_lang(lang)
         result = await service.merge_pdf_images(
             lang=current_lang,
+            merge_order=merge_order,
             pdf_file=pdf_file,
             image_files=image_files,
         )
